@@ -8,7 +8,6 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Hash;
-
 use Tymon\JWTAuth\Facades\JWTAuth;
 use App\Models\User;
 use App\Models\PasswordOtp;
@@ -18,7 +17,9 @@ use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\DB;
 
-use App\Mail\WelcomeMail;
+use App\Mail\WelcomeMail;    
+
+
 
 
 class AuthController extends Controller
@@ -158,7 +159,7 @@ class AuthController extends Controller
         }
     }
 
-    public function register(Request $req)
+    public function register_111(Request $req)
     {
         $validator = Validator::make($req->all(), [
             'name' => 'required|string|min:2|max:100',
@@ -193,28 +194,99 @@ class AuthController extends Controller
             // ---- MAIL DISPATCH + LOGGING ----
 
 
+          
+
+
+             try {
+            // Mail::to('sk.asif0490@gmil.com')->queue(new WelcomeMail('Asif'));
+
+             Mail::to('sk.asif0490@gmil.com')->queue(new WelcomeMail('Debug User'));
+              return 'WelcomeMail send() returned OK';
+        } catch (\Throwable $e) {
+
+            Log::error('Failed to queue OTP email', [
+                // 'email' => $email,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'status' => false,
+                'message' => 'Failed to send OTP. Please try again later.',
+                 'error' => $e->getMessage(),
+            ], 200);
+        }
+
+            return response()->json([
+                'status' => true,
+                'access_token' => $token,
+                'refresh_token' => $refreshToken,
+                'token_type' => 'bearer',
+                'expires_in' => auth()->factory()->getTTL() * 60,
+                // 'mail_status' => $mailStatus, // queued | sent | failed | not_attempted
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Registration failed', ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
+            return response()->json([
+                'status' => false,
+                'message' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+
+    public function register(Request $req)
+    {
+        $validator = Validator::make($req->all(), [
+            'name' => 'required|string|min:2|max:100',
+            'email' => 'required|string|email|max:100|unique:users,email',
+            'password' => 'required|min:6',
+            'phone' => 'required|digits:10|unique:users,phone',
+            'orginazationName' => 'required|string',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'status' => false,
+                'message' => $validator->errors()->first(),
+            ], 200);
+        }
+
+        try {
+            $userresult = User::create([
+                'name' => $req->name,
+                'email' => $req->email,
+                'password' => Hash::make($req->password),
+                'phone' => $req->phone,
+                'orginazationName' => $req->orginazationName,
+                'role' => 'Orginazation',
+            ]);
+
+            $token = JWTAuth::fromUser($userresult);
+            $refreshToken = Str::random(60);
+            $userresult->refresh_token = hash('sha256', $refreshToken);
+            $userresult->save();
+
+            // send welcome mail (use real user email)
             try {
+                // use the real email from request
+                Mail::to($userresult->email)->queue(new WelcomeMail($userresult->name));
 
-                Mail::to($req->email)->send(new WelcomeMail('Debug User'));
+                // Optionally set a flag on user that mail queued:
+                // $userresult->mail_status = 'queued';
+                // $userresult->save();
 
-                // If queue is configured to non-sync, queue. Otherwise send synchronously.
-                // if ($queueDefault && $queueDefault !== 'sync') {
-                //     Mail::to($userresult->email)->queue($mailable);
-                //     $mailStatus = 'queued';
-                //     Log::info('Welcome mail queued', ['user_id' => $userresult->id, 'email' => $userresult->email]);
-                // } else {
-                //     Mail::to($userresult->email)->send($mailable);
-                //     $mailStatus = 'sent';
-                //     Log::info('Welcome mail sent synchronously', ['user_id' => $userresult->id, 'email' => $userresult->email]);
-                // }
-            } catch (\Throwable $mailEx) {
-                // Don't block registration — log full trace for diagnosis
-                $mailStatus = 'failed';
-                Log::error('Welcome mail failed', [
-                    'user_id' => $userresult->id,
-                    'email' => $userresult->email,
-
+            } catch (\Throwable $e) {
+                Log::error('Failed to queue WelcomeMail', [
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString(),
                 ]);
+
+                // don't fail the whole registration for mail issue — return warning
+                return response()->json([
+                    'status' => false,
+                    'message' => 'Failed to send welcome email. Please try again later.',
+                    'error' => $e->getMessage(),
+                ], 200);
             }
 
             return response()->json([
@@ -223,7 +295,6 @@ class AuthController extends Controller
                 'refresh_token' => $refreshToken,
                 'token_type' => 'bearer',
                 'expires_in' => auth()->factory()->getTTL() * 60,
-                'mail_status' => $mailStatus, // queued | sent | failed | not_attempted
             ]);
         } catch (\Exception $e) {
             Log::error('Registration failed', ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
